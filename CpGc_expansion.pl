@@ -28,7 +28,8 @@
 use strict;
 
 
-my ($seqst, $ID, $seqlen, $seqlenbruto, $cpgnr, $prob, $output, $assembly_dir, $d, $plimit, $getd, @dd, @getd_hash ,@dist_n,$chrom_intersec,$genome_intersec);
+my ($seqst, $ID, $seqlen, $seqlenbruto, $cpgnr, $prob, $output, $assembly_dir,
+  $d, $plimit, $getd, @dd, @getd_hash ,@dist_n,$chrom_intersec,$genome_intersec, $bed_coords, $n_coords);
 
 &GetDefault();
 
@@ -121,21 +122,21 @@ if(opendir (my $DIR,$assembly_dir)){
 			&OUT_f(\@protoislas);
 			$output = $output_aux;
 		}
-		
+
 		#** End: single chrom INTERSEC
-	
-	
-		
-		
+
+
+
+
 		#** Begin: single chrom PERCENTILE
 		if(@getd_hash > 0){
 			@dd = sort {$a <=> $b} @dist_n;
-		
+
 			foreach(@getd_hash){
 				$getd = $_;
 				print "      ***               Calculating Percentile $getd            ***\n";
 				$d = &GetPerc(\@dd,$_);
-				
+
 				### get protoislands
 				print "      ***             Detecting CpG clusters (p$getd)           ***\n";
 				my @protoislas = &GetProtoIslas(\@cod);
@@ -150,23 +151,23 @@ if(opendir (my $DIR,$assembly_dir)){
 				$output .= $chrom."_p".$getd."_CpGcluster.txt";
 				&OUT_f(\@protoislas);
 				$output = $output_aux;
-				
+
 			}
 		}
-		
+
 		#** End: single chrom PERCENTILE
-	
+
 		push @dist_all,@dist_n if($genome_intersec); #genome
-	
+
 	}
-	
 
 
-	
+
+
 	#** Begin: genome
 	if($genome_intersec){
 		print "\n\n      --- Genome:\n\n";
-		my $Ndach_genome = $length_genome - $cpg_genome; 
+		my $Ndach_genome = $length_genome - $cpg_genome;
 		my $prob_genome = $cpg_genome/$Ndach_genome;
 		my ($max, $min) = getMinMaxDistance(\@dist_all, $prob_genome);
 
@@ -183,14 +184,14 @@ if(opendir (my $DIR,$assembly_dir)){
 			@protoislas = &CalcPvalNB(\@protoislas,$prob_genome);
 			## Get Features like the obs/esp, clustering etc....
 			@protoislas = &GetCGI_features(\@protoislas);
-			
+
 			## Writing output
 			$output .= $chrom."_genomeIntersec_CpGcluster.txt";
 			&OUT_f(\@protoislas);
-			$output = $output_aux;		
+			$output = $output_aux;
 		}
 	}
-	
+
 	closedir($DIR);
 }else{
 	die "Cannot open $assembly_dir\n"
@@ -225,7 +226,7 @@ sub GetDefault{
 	if($#ARGV < 2){
 	    print "Example for the usage of CpGcluster:\n\n";
 	    #print "perl CpGcluster.pl <assembly>  <d>  <P-value>\n\n";
-      print "perl Program.pl <BED> <d>  <P-value>"
+      print "perl Program.pl <BED> <d>  <P-value> [<assembly> [<N_BED> [<maxN>]]]";
 
 	    print "\nassembly:   Directory containing sequence files in FASTA format\n";
 
@@ -244,11 +245,13 @@ sub GetDefault{
 	    die "\n";
 	}
 
-	#ARGV0 - assembly/directory
-    $assembly_dir = $ARGV[0];
-    if(!(-e $assembly_dir)){
-		die "Cannot find the input directory: $assembly_dir\n";
-    }
+  if(-e $ARGV[0]){
+    $bed_coords = $ARGV[0];
+  }
+  else{
+    die "Cannot find the input file: $ARGV[0]\n";
+  }
+
 
     #ARGV1 - Percentile/ci/gi
 	$getd = $ARGV[1];
@@ -270,6 +273,27 @@ sub GetDefault{
     $plimit = $ARGV[2];
 	die "The maximal P-value you have choosen is higher than 1!\nPlease revise the order of the input parameters\n" if($plimit > 1);
 
+  if($#ARGV > 2){
+    #ARGV3 - assembly/directory
+    if(-d $ARGV[3]){
+      $assembly_dir = $ARGV[3];
+    }else{
+      die "Cannot find the input directory: $assembly_dir\n";
+    }
+    if($#ARGV > 3){
+      if(-e $ARGV[4]){
+        $n_coords = $ARGV[4];
+      }else{
+        die "Cannot find the inputo file: $ARGV[4]";
+      }
+
+      if($#ARGV > 4){
+        $maxN = $ARGV[5];
+        die "Incorrect value for maxN" if ($maxN < 0);
+
+      }
+    }
+  }
 
 	my @f = split(/\//,$assembly_dir);
 	my @f1 = split(/\./,$f[$#f]);
