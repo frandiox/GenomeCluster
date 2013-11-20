@@ -28,11 +28,9 @@
 use strict;
 
 
-my ($seqst, $ID, $seqlen, $seqlenbruto, $cpgnr, $prob, $output, $assembly_dir,
-  $d, $plimit, $getd, @dd, @getd_hash ,@dist_n,$chrom_intersec,$genome_intersec, $bed_coords, $n_coords);
-
-&GetDefault();
-
+my ($seqst, $ID, $seqlen, $seqlenbruto, $elemnr, $prob, $output, $assembly_dir,
+  $d, $plimit, $getd, @dd, @getd_hash ,@dist_n,$chrom_intersec,$genome_intersec,
+  $bed_file, $n_coords, $strand_sensitive, %chrom_bed, %chrom_dist_n);
 
 #################################
 ### Parameters ##################
@@ -40,41 +38,53 @@ my ($seqst, $ID, $seqlen, $seqlenbruto, $cpgnr, $prob, $output, $assembly_dir,
 my $maxN = 0; ## maximal number of Ns
 #################################
 
+&GetDefault();
 
-my @f_assembly = split(/\//,$assembly_dir);
-my @f1_assembly = split(/\./,$f_assembly[$#f_assembly]);
+
+#my @f_assembly = split(/\//,$assembly_dir);
+#my @f1_assembly = split(/\./,$f_assembly[$#f_assembly]);
 
 
 my @dist_all; # holds distances for the genome
-my $cpg_genome; # number of CpGs in genome
+my $elemnr_genome; # number of CpGs in genome
 my $length_genome; # number of dinucleotides in genome
-if(opendir (my $DIR,$assembly_dir)){
-	$cpg_genome = 0;
+
+
+####
+
+
+print "      ***             Getting    Coordinates            ***\n";
+GetBED();
+
+
+#die "tiriri";
+
+####
+
+#if(opendir (my $DIR,$assembly_dir)){
+	$elemnr_genome = 0;
 	$length_genome = 0;
 
 	my $output_aux = $output;
 	print "\n      --- Single chromosome:\n";
-	my %chrom_cods = ();
-	while(my $file = readdir($DIR)){
-		if($file eq "." || $file eq ".."){
-			next;
-		}else{
-			my @ext = split (/\./,$file);
-			next if($ext[$#ext] ne "fa");
-		}
 
-		print "\n      ".$file."\n";
+	for my $chrom (keys %chrom_bed){ ### MAIN LOOP
 
-		my $chrom = ((split(/\./,$file))[0]);
+		print "\n      ".$chrom."\n";
 
 		$output_aux = $output;
 
+    if($assembly_dir){
+      print $assembly_dir."\n";
+      my $file = $assembly_dir.'/'.$chrom.'.fa';
+  		print "\n      ***                  Reading   Sequence                ***\n";
+  		($seqst, $ID) = &GetFA($file); #seqst es toda la secuencia sin \n, ID es lo que hay detras de ">"
+    }
 
-		print "\n      ***                  Reading   Sequence                ***\n";
-		($seqst, $ID) = &GetFA($assembly_dir."/".$file); #seqst es toda la secuencia sin \n, ID es lo que hay detras de ">"
-		print "      ***             Getting   CpG   Coordinates            ***\n";
 		#my @cod = &GetCoords($seqst,"CG"); #coordenadas de inicio de cada elemento (solapa con la primera posición del elemento)
-		my @cod = GetBED($assembly_dir."/".$chrom.".bed");
+		#my @cod = GetBED($assembly_dir."/".$chrom.".bed");
+
+    #my $cod = $chrom_bed{$chrom}{'cStart'}; # $cod es un ARRAY REF
 
 
 #open (S,">seqst.txt") or die "Can't open pinchado.txt";
@@ -88,30 +98,47 @@ if(opendir (my $DIR,$assembly_dir)){
 	#print P $elem;
 
 
-		$chrom_cods{$chrom} = \@cod; #para la IG
+    print "      ***             Calculating   Seq   Features           ***\n";
+    my ($num_dinuc,$last_chunk);
+    $elemnr = $#{ $chrom_bed{$chrom}{'cStart'} } + 1; #numero de entradas almacenadas para este chrom
+    if($assembly_dir){ #suponemos que nos dan la secuencia
+		  ($num_dinuc, $seqlen) = &GetSeqFeat($seqst);
+      $seqlenbruto = length($seqst);
+      $last_chunk = $seqlen - $chrom_bed{$chrom}{'cEnd'}[$elemnr - 1];
+		}else{ #ESTIMACIONES
+      #$seqlen = $chrom_bed{$chrom}{'cEnd'}[$elemnr - 1]; #estimacion = cEnd del ultimo elemento
+      my $sum = $chrom_bed{$chrom}{'cStart'}[0];
+      for (my $i = 1; $i < $elemnr; $i++){
+        $sum += $chrom_bed{$chrom}{'cStart'}[$i] - $chrom_bed{$chrom}{'cEnd'}[$i-1]
+      }
+      $last_chunk = (int(($sum/$elemnr) + 0.5)); # se hace un round()
+      $seqlen = $chrom_bed{$chrom}{'cEnd'}[$elemnr - 1] + $last_chunk;
+      $num_dinuc = $seqlen - 1;
+      $seqlenbruto = $seqlen;
 
-		print "      ***             Calculating   Seq   Features           ***\n";
-		(my $num_dinuc, $cpgnr, $seqlen) = &GetSeqFeat($seqst); #suponemos que nos dan la secuencia
-		$seqlenbruto = length($seqst);
+    }
+    push @{ $chrom_dist_n{$chrom} }, $last_chunk; #TODO: comprobar si tiene Ns antes de insertar
+
+
 
 		if($genome_intersec){ #genome
-			$cpg_genome += $cpgnr;
+			$elemnr_genome += $elemnr;
 			$length_genome += $num_dinuc;
 		}
 
-		## Prob CpG
-		my $Ndach = $num_dinuc - $cpgnr;
-		$prob = $cpgnr/$Ndach;
+		## Prob CpG ##TODO:cambiar la probabilidad
+		my $Ndach = $num_dinuc - $elemnr;
+		$prob = $elemnr/$Ndach;
 
 		#** Begin: single chrom INTERSEC
 		if($chrom_intersec){
 			print "      ***          Calculating  Chrom  Intersection          ***\n";
-			my ($max, $min) = getMinMaxDistance(\@dist_n, $prob);
+			my ($max, $min) = getMinMaxDistance($chrom_dist_n{$chrom}, $prob);
 			$d = $max;
 			$getd = "Chromosome Intersection";
 			### get protoislands
 			print "      ***      Detecting CpG clusters  (Chrom Intersec)      ***\n";
-			my @protoislas = &GetProtoIslas(\@cod);
+			my @protoislas = &GetProtoIslas($chrom_bed{$chrom}{'cStart'},$chrom_bed{$chrom}{'cEnd'});
 			print "      ***       Calculating P-values  (Chrom Intersec)       ***\n";
 			@protoislas = &CalcPvalNB(\@protoislas,$prob);
 			## Get Features like the obs/esp, clustering etc....
@@ -130,7 +157,7 @@ if(opendir (my $DIR,$assembly_dir)){
 
 		#** Begin: single chrom PERCENTILE
 		if(@getd_hash > 0){
-			@dd = sort {$a <=> $b} @dist_n;
+			@dd = sort {$a <=> $b} @{ $chrom_dist_n{$chrom} };
 
 			foreach(@getd_hash){
 				$getd = $_;
@@ -139,14 +166,28 @@ if(opendir (my $DIR,$assembly_dir)){
 
 				### get protoislands
 				print "      ***             Detecting CpG clusters (p$getd)           ***\n";
-				my @protoislas = &GetProtoIslas(\@cod);
+				my @protoislas = &GetProtoIslas($chrom_bed{$chrom}{'cStart'},$chrom_bed{$chrom}{'cEnd'});
+
+
+
+#open (P,">pinchado222.txt") or die "Can't open pinchado222.txt";
+#foreach my $elem (@protoislas){
+#  print P @{$elem};
+#  print P "\n";
+#  }
+#  close (P);
+
+
+
+
 
 				print "      ***              Calculating P-values  (p$getd)           ***\n";
 				@protoislas = &CalcPvalNB(\@protoislas,$prob);
 
+        print "getting last features...\n";
 				## Get Features like the obs/esp, clustering etc....
 				@protoislas = &GetCGI_features(\@protoislas);
-
+        print "writing\n";
 				## Writing output
 				$output .= $chrom."_p".$getd."_CpGcluster.txt";
 				&OUT_f(\@protoislas);
@@ -157,7 +198,7 @@ if(opendir (my $DIR,$assembly_dir)){
 
 		#** End: single chrom PERCENTILE
 
-		push @dist_all,@dist_n if($genome_intersec); #genome
+		push @dist_all,@{ $chrom_dist_n{$chrom} } if($genome_intersec); #genome
 
 	}
 
@@ -167,11 +208,16 @@ if(opendir (my $DIR,$assembly_dir)){
 	#** Begin: genome
 	if($genome_intersec){
 		print "\n\n      --- Genome:\n\n";
-		my $Ndach_genome = $length_genome - $cpg_genome;
-		my $prob_genome = $cpg_genome/$Ndach_genome;
+    #$elemnr = 0;
+    #for my $chrom_key (keys %chrom_bed){
+    #  $elemnr += $#{ $chrom_bed{$chrom_key}{'cStart'} } + 1;
+    #}
+
+		my $Ndach_genome = $length_genome - $elemnr_genome;
+		my $prob_genome = $elemnr_genome/$Ndach_genome;
 		my ($max, $min) = getMinMaxDistance(\@dist_all, $prob_genome);
 
-		foreach (keys %chrom_cods){
+		foreach (keys %chrom_bed){
 			my $chrom = $_;
 			print "\n      ".$_."\n";
 			$d = $max;
@@ -179,7 +225,7 @@ if(opendir (my $DIR,$assembly_dir)){
 			### get protoislands
 			print "      ***      Detecting CpG clusters (Genome Intersec)      ***\n";
 			($seqst, $ID) = &GetFA($assembly_dir."/".$chrom.".fa");
-			my @protoislas = &GetProtoIslas($chrom_cods{$chrom});
+			my @protoislas = &GetProtoIslas($chrom_bed{$chrom}{'cStart'},$chrom_bed{$chrom}{'cEnd'});
 			print "      ***       Calculating P-values (Genome Intersec)       ***\n\n\n";
 			@protoislas = &CalcPvalNB(\@protoislas,$prob_genome);
 			## Get Features like the obs/esp, clustering etc....
@@ -187,15 +233,16 @@ if(opendir (my $DIR,$assembly_dir)){
 
 			## Writing output
 			$output .= $chrom."_genomeIntersec_CpGcluster.txt";
+      $elemnr = $elemnr_genome;
 			&OUT_f(\@protoislas);
 			$output = $output_aux;
 		}
 	}
 
-	closedir($DIR);
-}else{
-	die "Cannot open $assembly_dir\n"
-}
+#	closedir($DIR);
+#}else{
+#	die "Cannot open $assembly_dir\n"
+#}
 
 #** End: genome
 
@@ -223,10 +270,10 @@ sub GetDefault{
   print "\n";
 
 
-	if($#ARGV < 2){
+	if($#ARGV < 3){
 	    print "Example for the usage of CpGcluster:\n\n";
 	    #print "perl CpGcluster.pl <assembly>  <d>  <P-value>\n\n";
-      print "perl Program.pl <BED> <d>  <P-value> [<assembly> [<N_BED> [<maxN>]]]";
+      print "perl Program.pl <BED> <strand_sensitive> <d>  <P-value> [<assembly> [<N_BED> [<maxN>]]]";
 
 	    print "\nassembly:   Directory containing sequence files in FASTA format\n";
 
@@ -245,17 +292,30 @@ sub GetDefault{
 	    die "\n";
 	}
 
-  if(-e $ARGV[0]){
-    $bed_coords = $ARGV[0];
+  #DEFAULT
+  $strand_sensitive = 0;
+  $assembly_dir = 0;
+  $maxN = 0;
+  $n_coords = 0;
+
+
+  my $i= 0;
+  if(-e $ARGV[$i]){
+    $bed_file = $ARGV[$i];
   }
   else{
-    die "Cannot find the input file: $ARGV[0]\n";
+    die "Cannot find the input file: $ARGV[$i]\n";
   }
 
+  $i++;
+    #strand sensitive
+  $strand_sensitive = $ARGV[$i];
 
+
+  $i++;
     #ARGV1 - Percentile/ci/gi
-	$getd = $ARGV[1];
-	foreach(split(',',$ARGV[1])){
+	$getd = $ARGV[$i];
+	foreach(split(',',$ARGV[$i])){
 		if(/\D/){
 			if(lc eq 'ci'){
 				$chrom_intersec = 1;
@@ -269,37 +329,44 @@ sub GetDefault{
 		}
 	}
 
+  $i++;
   	#ARGV2 - pLimit
-    $plimit = $ARGV[2];
+    $plimit = $ARGV[$i];
 	die "The maximal P-value you have choosen is higher than 1!\nPlease revise the order of the input parameters\n" if($plimit > 1);
 
-  if($#ARGV > 2){
+  if($#ARGV > $i){
+    $i++;
     #ARGV3 - assembly/directory
-    if(-d $ARGV[3]){
-      $assembly_dir = $ARGV[3];
+    if(-d $ARGV[$i]){
+      $assembly_dir = $ARGV[$i];
+
     }else{
-      die "Cannot find the input directory: $assembly_dir\n";
+      die "Cannot find the input directory: $ARGV[$i]\n";
     }
-    if($#ARGV > 3){
-      if(-e $ARGV[4]){
-        $n_coords = $ARGV[4];
+    if($#ARGV > $i){
+      $i++;
+      if(-e $ARGV[$i]){
+        $n_coords = $ARGV[$i];
       }else{
-        die "Cannot find the inputo file: $ARGV[4]";
+        die "Cannot find the inputo file: $ARGV[$i]";
       }
 
-      if($#ARGV > 4){
-        $maxN = $ARGV[5];
+      if($#ARGV > $i){
+        $i++;
+        $maxN = $ARGV[$i];
         die "Incorrect value for maxN" if ($maxN < 0);
 
       }
     }
   }
 
-	my @f = split(/\//,$assembly_dir);
-	my @f1 = split(/\./,$f[$#f]);
-	$f[$#f] = "$f1[0]";
-	$output = join('/',@f);
-	$output .= "/";
+
+  mkdir "./result", 0755;
+	#my @f = split(/\//,$assembly_dir);
+	#my @f1 = split(/\./,$f[$#f]);
+	#$f[$#f] = "$f1[0]";
+	#$output = join('/',@f);
+	$output = "./result/";
 
 
 }
@@ -323,52 +390,41 @@ sub GetFA{
     $z =~ s/[\n\t\f\r_0-9\s]//g;
     $seqst_temp .= $z;
   }
+  close(I);
+
   return ($seqst_temp,$ID_temp);
 }
 
 sub GetBED{
 
-  my @bed;
-  my $last_coord = 1;
-  open (B,$_[0]) or die "Can't open $_[0]";
+  my $last_coord;
+  open (B,$bed_file) or die "Can't open $bed_file";
+
   while ( my $line = <B> ) {
-       my $rec = {};
-       my @recsplit = split("\t", $line);
-       $rec->{chrom} = $recsplit[0];
-       $rec->{cStart} = $recsplit[1];
-       $rec->{cEnd} = $recsplit[2];
-       $rec->{id} = $recsplit[3];
-       $rec->{score} = $recsplit[4];
-       $rec->{strand} = $recsplit[5];
+     my $rec = {};
+     my @recsplit = split("\t", $line);
+     my $chrom = $recsplit[0];
 
-       push @bed, $rec;
+     if(!exists($chrom_bed{$chrom})){ #Reinicializar para cuando cambie de cromosoma
+       $last_coord = 0;
+     }
 
-       push @dist_n, ($rec->{cStart} - $last_coord);
-       $last_coord = $rec->{cEnd};
+     push @{ $chrom_bed{$chrom}{'cStart'} }, $recsplit[1];
+     push @{ $chrom_bed{$chrom}{'cEnd'} }, $recsplit[2];
+     #push @{ $chrom_bed{$chrom}{'id'} }, $recsplit[3];
+     #push @{ $chrom_bed{$chrom}{'score'} }, $recsplit[4];
+     #push @{ $chrom_bed{$chrom}{'strand'} }, $recsplit[5];
+
+     #TODO: comprobar si el trozo en cuestion contiene Ns
+     push @{ $chrom_dist_n{$chrom} }, ($recsplit[1] - $last_coord);
+     $last_coord = $recsplit[2];
+
   }
 
-  push @dist_n, $bed[$#bed]{cStart}; #### coordenadas, revisar extremos
-  #meter la actualizacion de @dist_n en el bucle aterior de forma tricky
-
-
-
-  my $n = $_[0];
-
-  $n.="j";
-  my @f =split(/$_[1]/i,$n);
-  my @t;
-
-  my $lencount = 0;
-  for(my $i = 0; $i < $#f; $i++){
-    $lencount += length($f[$i]);
-    $t[$i] = $lencount + 1;
-    $lencount+=2;
-    my $nnr = $f[$i] =~ s/n/n/ig;
-    if($nnr <= $maxN){
-      push @dist_n,length($f[$i])+1;
-    }
-  }
-  return @t;
+  #TODO
+  #FALTA METER EL ULTIMO TROZO DE CADA CHROM
+  #EN $chrom_dist_n, PARA ELLO SE NECESITA
+  #LA LONGITUD DE CADA CROMOSOMA
 }
 
 sub OUT_f {
@@ -376,8 +432,8 @@ sub OUT_f {
 
   open (OO,">$output") or die "could not open $output";
   print OO "CGI\tFrom\tTo\tLength\tCount\tOEratio\t%G+C\tPatDen\tPValue\tlogPValue\n";
- 
-  
+
+
   while($_[0]->[$c]){
 	my $log_pvalue = ($_[0]->[$c]->[8] == 0 ? 0 : (log($_[0]->[$c]->[8])/log(10)));
 	my $patden = ($_[0]->[$c]->[3]/$_[0]->[$c]->[2]);
@@ -389,13 +445,13 @@ sub OUT_f {
   open(O,">$output-log.txt") or die "can't open $output-log.txt";
   print O "Basic statistics of the input sequence: $ID\n";
   printf O "Length: %d\n",$seqlen;
-  printf O "Length without Ns: %d\n",$seqlenbruto;
+  printf O "Length including Ns: %d\n",$seqlenbruto;
   my $fg = $seqst =~ s/g/g/ig;
   my $fc = $seqst =~ s/c/c/ig;
   my $fa = $seqst =~ s/a/a/ig;
   my $ft = $seqst =~ s/t/t/ig;
   printf O "GC content: %0.3f\n",100*($fg+$fc)/$seqlen;
-  printf O "Number of CpGs in sequence: %d\n",$cpgnr;
+  printf O "Number of elements in sequence: %d\n",$elemnr;
   printf O "Probability to find a CpG: %.4f\n\n",$prob;
   print O "Parameters used:\n";
 
@@ -414,19 +470,20 @@ sub OUT_f {
 ## Get CpG cluster
 sub GetProtoIslas{
 
-  my @coord = @{$_[0]};
+  my @cStart = @{$_[0]};
+  my @cEnd = @{$_[1]};
   my @t;
   my ($start, $end);
   my $des = "no";
-  for(my $i = 0; $i <= $#coord - 1; $i++){
-    
-    my $dist = $coord[$i+1]  - ($coord[$i] + 1);
+  for(my $i = 0; $i <= $#cStart - 1; $i++){
+
+    my $dist = $cStart[$i+1]  - $cEnd[$i]; ## revisar coordenadas
 
     if($dist <= $d){
       if($des eq "no"){
-	$start = $coord[$i];
+	      $start = $cStart[$i];
       }
-      $end = $coord[$i+1]+1;
+      $end = $cEnd[$i+1] - 1;
       $des = "yes";
     }
     elsif($dist > $d and $des eq "yes"){
@@ -448,12 +505,12 @@ sub GetCGI_features{
   my $c=0;
   while(defined($_[0]->[$c])){
     if($_[0]->[$c]->[4] < $plimit){
-
+      #TODO: arreglar valores cpg
       my $len = $_[0]->[$c]->[1] - $_[0]->[$c]->[0] +1;
       (my $oe, my $cpgseq, my $gccont)= &CalcObsEsp($_[0]->[$c]->[0] -1,$len);
       my $coord1 = &GetCoord($cpgseq);
       (my $clust, my $meandist) = &GetClust($coord1);
-      
+
       my $pval = $_[0]->[$c]->[4];
       $_[0]->[$c]->[4] = $oe;
       $_[0]->[$c]->[5] = $meandist;
@@ -482,8 +539,9 @@ sub CalcObsEsp{
 sub GetSeqFeat{
 
   my $n = $_[0];
-  my $CpGnr = $n =~ s/CG/Cg/ig;
-  my $NN = $n =~ s/N/N/ig;  
+  #my $elemnr = $n =~ s/CG/Cg/ig;
+
+  my $NN = $n =~ s/N/N/ig;
   my $seqlen = length($n)-$NN;
   my $num_dinuc = 0;
 
@@ -496,15 +554,14 @@ sub GetSeqFeat{
   		$num_dinuc++;
   	}
   }
-  
-  return ($num_dinuc,$CpGnr,$seqlen);
+  return ($num_dinuc,$seqlen);
 }
 
 
 sub GetCoords{
 
   my $n = $_[0];
-  
+
   $n.="j";
   my @f =split(/$_[1]/i,$n);
   my @t;
@@ -547,17 +604,22 @@ sub CalcPvalNB{
   my ($pval, @temp);
   my $c=0;
   my @islas = @{$_[0]};
-  for(my $i = 0; $i <= $#islas; $i++){
+print "debug1\n";
 
+  for(my $i = 0; $i <= $#islas; $i++){
+print $i;
     my $l = $islas[$i]->[1] - $islas[$i]->[0] + 1;
     my $str = substr ($seqst,$islas[$i]->[0]-1,$l);
     my $cpg = $str =~ s/cg/cg/ig;
+    #my $pval = &GetNB({{{$l-(2*$cpg}}}),$cpg-1,$_[1]); TODO: cambiar la tasa de failures
     my $pval = &GetNB($l-(2*$cpg),$cpg-1,$_[1]);
     $pval = sprintf("%.5e",$pval);
     my @t = ($islas[$i]->[0],$islas[$i]->[1],$l,$cpg,$pval);
     push @temp, \@t;;
     $c++;
   }
+
+  print "\ndebug2\n";
   return @temp;
 }
 sub GetNB{
@@ -689,5 +751,4 @@ sub getMinMaxDistance{
 	}
 	
 	return ($maxD, $minD);
-	
 }
