@@ -30,7 +30,7 @@ use strict;
 
 my ($seqst, $ID, $seqlen, $seqlenbruto, $elemnr, $prob, $output, $assembly_dir,
   $d, $plimit, $getd, @dd, @getd_hash ,@dist_n,$chrom_intersec,$genome_intersec,
-  $bed_file, $n_coords, $strand_sensitive, %chrom_bed, %chrom_dist_n);
+  $bed_file, $n_coords, $strand_sensitive, %chrom_bed, @all_dist_n, %n_chrom_index);
 
 #################################
 ### Parameters ##################
@@ -117,8 +117,9 @@ GetBED();
       $seqlenbruto = $seqlen;
 
     }
-    push @{ $chrom_dist_n{$chrom} }, $last_chunk; #TODO: comprobar si tiene Ns antes de insertar
-
+    #push @{ $all_dist_n{$chrom} }, $last_chunk; #TODO: comprobar si tiene Ns antes de insertar
+    my $last_chunk_ns  = 0;
+    push @all_dist_n, $last_chunk if (!$last_chunk_ns);;
 
 
 		if($genome_intersec){ #genome
@@ -130,10 +131,13 @@ GetBED();
 		my $Ndach = $num_dinuc - $elemnr;
 		$prob = $elemnr/$Ndach;
 
+    my @dist_n = @all_dist_n[$n_chrom_index{$chrom}[0] .. $n_chrom_index{$chrom}[1]];
+    push @dist_n, $last_chunk if (!$last_chunk_ns);
+
 		#** Begin: single chrom INTERSEC
 		if($chrom_intersec){
 			print "      ***          Calculating  Chrom  Intersection          ***\n";
-			my ($max, $min) = getMinMaxDistance($chrom_dist_n{$chrom}, $prob);
+			my ($max, $min) = getMinMaxDistance(\@dist_n, $prob);
 			$d = $max;
 			$getd = "Chromosome Intersection";
 			### get protoislands
@@ -157,7 +161,7 @@ GetBED();
 
 		#** Begin: single chrom PERCENTILE
 		if(@getd_hash > 0){
-			@dd = sort {$a <=> $b} @{ $chrom_dist_n{$chrom} };
+			@dd = sort {$a <=> $b} @dist_n;#@{ $all_dist_n{$chrom} }; TODO: quitar variables globales como @dd
 
 			foreach(@getd_hash){
 				$getd = $_;
@@ -198,12 +202,14 @@ GetBED();
 
 		#** End: single chrom PERCENTILE
 
-		push @dist_all,@{ $chrom_dist_n{$chrom} } if($genome_intersec); #genome
+		#push @dist_all,@{ $all_dist_n{$chrom} } if($genome_intersec); #genome
+    #undef (@{ $all_dist_n{$chrom} }); # Podría dar problemas
 
 	}
 
 
-
+  #TODO: Ya no tiene sentido sacar la IG del bucle principal. Hay que ponerlo dentro para optimizar recursos.
+  #Cambiar la estructura de $all_dist_n
 
 	#** Begin: genome
 	if($genome_intersec){
@@ -215,10 +221,9 @@ GetBED();
 
 		my $Ndach_genome = $length_genome - $elemnr_genome;
 		my $prob_genome = $elemnr_genome/$Ndach_genome;
-		my ($max, $min) = getMinMaxDistance(\@dist_all, $prob_genome);
+		my ($max, $min) = getMinMaxDistance(\@all_dist_n, $prob_genome);
 
-		foreach (keys %chrom_bed){
-			my $chrom = $_;
+		foreach my $chrom (keys %chrom_bed){
 			print "\n      ".$_."\n";
 			$d = $max;
 			$getd = "Genome Intersection";
@@ -398,6 +403,7 @@ sub GetFA{
 sub GetBED{
 
   my $last_coord;
+  my $i = 0;
   open (B,$bed_file) or die "Can't open $bed_file";
 
   while ( my $line = <B> ) {
@@ -407,6 +413,7 @@ sub GetBED{
 
      if(!exists($chrom_bed{$chrom})){ #Reinicializar para cuando cambie de cromosoma
        $last_coord = 0;
+       $n_chrom_index{$chrom} = [$i, $i-1];
      }
 
      push @{ $chrom_bed{$chrom}{'cStart'} }, $recsplit[1];
@@ -415,16 +422,16 @@ sub GetBED{
      #push @{ $chrom_bed{$chrom}{'score'} }, $recsplit[4];
      #push @{ $chrom_bed{$chrom}{'strand'} }, $recsplit[5];
 
+     #push @{ $all_dist_n{$chrom} }, ($recsplit[1] - $last_coord);
+     #$last_coord = $recsplit[2];
+
      #TODO: comprobar si el trozo en cuestion contiene Ns
-     push @{ $chrom_dist_n{$chrom} }, ($recsplit[1] - $last_coord);
+     push @all_dist_n, ($recsplit[1] - $last_coord);
+     $n_chrom_index{$chrom}[1] = $i; #indices [ )
+     $i++;
      $last_coord = $recsplit[2];
 
   }
-
-  #TODO
-  #FALTA METER EL ULTIMO TROZO DE CADA CHROM
-  #EN $chrom_dist_n, PARA ELLO SE NECESITA
-  #LA LONGITUD DE CADA CROMOSOMA
 }
 
 sub OUT_f {
