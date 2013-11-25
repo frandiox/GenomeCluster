@@ -30,7 +30,7 @@ use strict;
 
 my ($seqst, $ID, $seqlen, $seqlenbruto, $elemnr, $prob, $output, $assembly_dir,
   $d, $plimit, $getd, @dd, @getd_hash ,@dist_n,$chrom_intersec,$genome_intersec,
-  $bed_file, $n_coords, $strand_sensitive, %chrom_bed, @all_dist_n, %n_chrom_index);
+  $bed_file, $nBedFile, %n_coords, $strand_sensitive, %chrom_bed, @all_dist_n, %n_chrom_index);
 
 #################################
 ### Parameters ##################
@@ -110,7 +110,7 @@ GetBED();
 
 		  ($num_dinuc, $seqlen) = &GetSeqFeat($seqst);
       $seqlenbruto = length($seqst);
-      $last_chunk = $seqlen - $chrom_bed{$chrom}{'cEnd'}[$elemnr - 1];
+      $last_chunk = $seqlenbruto - $chrom_bed{$chrom}{'cEnd'}[$elemnr - 1]; #seqlenbruto?
 		}else{ #ESTIMACIONES
       #$seqlen = $chrom_bed{$chrom}{'cEnd'}[$elemnr - 1]; #estimacion = cEnd del ultimo elemento
       my $sum2 = $chrom_bed{$chrom}{'cStart'}[0];
@@ -124,8 +124,8 @@ GetBED();
 
     }
     #push @{ $all_dist_n{$chrom} }, $last_chunk; #TODO: comprobar si tiene Ns antes de insertar
-    my $last_chunk_ns  = 0;
-    push @all_dist_n, $last_chunk if (!$last_chunk_ns);;
+    my $last_chunk_ns = matchN($chrom, $chrom_bed{$chrom}{'cEnd'}, $chrom_bed{$chrom}{'cEnd'} + $last_chunk);
+    push @all_dist_n, $last_chunk unless $last_chunk_ns;
 
 
 		if($genome_intersec){ #genome
@@ -289,7 +289,7 @@ sub GetDefault{
 	if($#ARGV < 3){
 	    print "Example for the usage of CpGcluster:\n\n";
 	    #print "perl CpGcluster.pl <assembly>  <d>  <P-value>\n\n";
-      print "perl Program.pl <BED> <strand_sensitive> <d>  <P-value> [<assembly> [<N_BED> [<maxN>]]]";
+      print "perl Program.pl <BED> <d> <P-value> [<assembly> [<N_BED> [<maxN>]]]";
 
 	    print "\nassembly:   Directory containing sequence files in FASTA format\n";
 
@@ -312,7 +312,7 @@ sub GetDefault{
   $strand_sensitive = 0;
   $assembly_dir = 0;
   $maxN = 0;
-  $n_coords = 0;
+  $nBedFile = 0;
 
 
   my $i= 0;
@@ -322,11 +322,6 @@ sub GetDefault{
   else{
     die "Cannot find the input file: $ARGV[$i]\n";
   }
-
-  $i++;
-    #strand sensitive
-  $strand_sensitive = $ARGV[$i];
-
 
   $i++;
     #ARGV1 - Percentile/ci/gi
@@ -362,7 +357,8 @@ sub GetDefault{
     if($#ARGV > $i){
       $i++;
       if(-e $ARGV[$i]){
-        $n_coords = $ARGV[$i];
+        $nBedFile = $ARGV[$i];
+        getNbed($nBedFile);
       }else{
         die "Cannot find the inputo file: $ARGV[$i]";
       }
@@ -437,7 +433,7 @@ sub GetBED{
      #$last_coord = $recsplit[2];
 
      #TODO: comprobar si el trozo en cuestion contiene Ns
-     push @all_dist_n, ($recsplit[1] - $last_coord);
+     push @all_dist_n, ($recsplit[1] - $last_coord) unless matchN($chrom, $last_coord, $recsplit[1]);
      $n_chrom_index{$chrom}[1] = $i; #indices [ )
      $i++;
      $last_coord = $recsplit[2];
@@ -560,14 +556,14 @@ sub GetSeqFeat{
 
   my $n = $_[0];
   #my $elemnr = $n =~ s/CG/Cg/ig;
-
+  my $ln = length($n);
   my $NN = $n =~ s/N/N/ig;
-  my $seqlen = length($n)-$NN;
+  my $seqlen = $ln-$NN;
   my $num_dinuc = 0;
 
 
   my $elem;
-  my $limit = length($n) - 1;
+  my $limit = $ln - 1;
   for(my $i = 0; $i < $limit; $i++){
   	$elem = substr($n,$i,2);
   	if($elem !~ m/N/i){
@@ -615,6 +611,36 @@ sub GetPerc{
   return $t[$#t];
 }
 
+sub getNbed{
+  open(N, '<'.$_[0]) or die "Cannot open file input: $_[0]\n";
+    while ( my $line = <N> ) {
+      my $rec = {};
+      my @recsplit = split("\t", $line);
+      my $chrom = $recsplit[0];
+
+      if(!exists($n_coords{$chrom})){
+        $n_coords{$chrom} = [];
+      }
+
+      push $n_coords{$chrom}, [$recsplit[1], $recsplit[2]];
+  }
+
+  close(N);
+
+}
+
+sub matchN{
+  my ($chrom, $cStart, $cEnd) = @_;
+
+  foreach my $elem (@{$n_coords{$chrom}}){
+    if(($cStart >= $elem->[0] && $cStart <= $elem->[1]) || ($cEnd >= $elem->[0] && $cEnd <= $elem->[1])){
+      return 1; #hay N
+    }
+  }
+
+  return 0; #No hay N
+}
+
 
 ##########################################################################
 ############## SUBFUNCTIONS for P-value calculations  ####################
@@ -639,7 +665,7 @@ print $i;
     #my $cpg = $str =~ s/cg/cg/ig;
     my $gel = $islas[$i]->[2];
     #my $pval = &GetNB({{{$l-(2*$cpg}}}),$cpg-1,$_[1]);
-    my $pval = &GetNB($l-($elmean*$gel),$gel-1,$prob_ge);
+    my $pval = &GetNB($l-($elmean*$gel),$gel-1,$prob_ge); #Mirar que el numero de no-elementos sea positivo
     $pval = sprintf("%.5e",$pval);
     my @t = ($islas[$i]->[0],$islas[$i]->[1],$l,$gel,$pval);
     push @temp, \@t;;
