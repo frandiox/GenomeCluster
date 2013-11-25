@@ -158,7 +158,7 @@ GetBED();
 
 			## Writing output
 			$output .= $chrom."_chromIntersec_CpGcluster.txt";
-			&OUT_f(\@protoislas);
+			&OUT_f(\@protoislas, $chrom);
 			$output = $output_aux;
 		}
 
@@ -202,7 +202,7 @@ GetBED();
         print "writing\n";
 				## Writing output
 				$output .= $chrom."_p".$getd."_CpGcluster.txt";
-				&OUT_f(\@protoislas);
+				&OUT_f(\@protoislas, $chrom);
 				$output = $output_aux;
 
 			}
@@ -250,7 +250,7 @@ GetBED();
 			## Writing output
 			$output .= $chrom."_genomeIntersec_CpGcluster.txt";
       $elemnr = $elemnr_genome;
-			&OUT_f(\@protoislas);
+			&OUT_f(\@protoislas, $chrom);
 			$output = $output_aux;
 		}
 	}
@@ -444,15 +444,53 @@ sub GetBED{
 sub OUT_f { #TODO: crear nuevo output
   my $c=0;
 
+  open (OO,">$output") or die "Cannot not open $output";
+  print OO "Chrom\tFrom\tTo\tLength\tCount\tPatDen\tPValue\tlogPValue\n";
+
+
+  while($_[0]->[$c]){
+	my $log_pvalue = ($_[0]->[$c]->[4] == 0 ? 0 : (log($_[0]->[$c]->[4])/log(10)));
+	my $patden = ($_[0]->[$c]->[3]/$_[0]->[$c]->[2]);
+	printf OO "%i\t%i\t%i\t%i\t%i\t%.3f\t%.2e\t%.2f\n", $_[1], $_[0]->[$c]->[0], $_[0]->[$c]->[1], $_[0]->[$c]->[2], $_[0]->[$c]->[3], $patden, $_[0]->[$c]->[4],$log_pvalue;
+    $c++;
+  }
+  close(OO);
+  open(O,">$output-log.txt") or die "can't open $output-log.txt";
+  print O "Basic statistics of the input sequence: $_[1]"."_".$getd."\n";
+  printf O "Length: %d\n",$seqlen;
+  printf O "Length including Ns: %d\n",$seqlenbruto;
+  #my $fg = $seqst =~ s/g/g/ig; #TODO: arreglar estas variables para Genome Intersec
+  #my $fc = $seqst =~ s/c/c/ig;
+  #my $fa = $seqst =~ s/a/a/ig;
+  #my $ft = $seqst =~ s/t/t/ig;
+  #printf O "GC content: %0.3f\n",100*($fg+$fc)/$seqlen;
+  printf O "Number of elements in sequence: %d\n",$elemnr;
+  printf O "Probability to find a genomic element: %.4f\n\n",$prob;
+  print O "Parameters used:\n";
+
+  printf O "p-value threshold: $plimit\n";
+  if($getd){
+    print O "Distance threshold method: ";
+    $_ = $getd;
+    print O "percentile " if(/\d/);
+    print O "$getd\n";
+  }
+
+  close(O);
+}
+
+sub OUT_f2 { #TODO: crear nuevo output
+  my $c=0;
+
   open (OO,">$output") or die "could not open $output";
   print OO "CGI\tFrom\tTo\tLength\tCount\tOEratio\t%G+C\tPatDen\tPValue\tlogPValue\n";
 
 
   while($_[0]->[$c]){
-	my $log_pvalue = ($_[0]->[$c]->[8] == 0 ? 0 : (log($_[0]->[$c]->[8])/log(10)));
-	my $patden = ($_[0]->[$c]->[3]/$_[0]->[$c]->[2]);
-	my $gc = ($_[0]->[$c]->[7]/$_[0]->[$c]->[2]);
-	printf OO "%i\t%i\t%i\t%i\t%i\t%.3f\t%.2f\t%.3f\t%.2e\t%.2f\n",$c+1, $_[0]->[$c]->[0], $_[0]->[$c]->[1], $_[0]->[$c]->[2], $_[0]->[$c]->[3], $_[0]->[$c]->[4], $gc*100, $patden, $_[0]->[$c]->[8],$log_pvalue;
+  my $log_pvalue = ($_[0]->[$c]->[8] == 0 ? 0 : (log($_[0]->[$c]->[8])/log(10)));
+  my $patden = ($_[0]->[$c]->[3]/$_[0]->[$c]->[2]);
+  my $gc = ($_[0]->[$c]->[7]/$_[0]->[$c]->[2]);
+  printf OO "%i\t%i\t%i\t%i\t%i\t%.3f\t%.2f\t%.3f\t%.2e\t%.2f\n",$c+1, $_[0]->[$c]->[0], $_[0]->[$c]->[1], $_[0]->[$c]->[2], $_[0]->[$c]->[3], $_[0]->[$c]->[4], $gc*100, $patden, $_[0]->[$c]->[8],$log_pvalue;
     $c++;
   }
   close(OO);
@@ -479,8 +517,6 @@ sub OUT_f { #TODO: crear nuevo output
 
   close(O);
 }
-
-
 ## Get CpG cluster
 sub GetProtoIslas{
 
