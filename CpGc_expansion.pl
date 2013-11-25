@@ -46,8 +46,9 @@ my $maxN = 0; ## maximal number of Ns
 
 
 my @dist_all; # holds distances for the genome
-my $elemnr_genome; # number of CpGs in genome
+my $elemnr_genome; # number of genomic elements in genome
 my $length_genome; # number of dinucleotides in genome
+my $elmean_genome; # genomic element mean length in genome
 
 
 ####
@@ -64,6 +65,7 @@ GetBED();
 #if(opendir (my $DIR,$assembly_dir)){
 	$elemnr_genome = 0;
 	$length_genome = 0;
+  $elmean_genome = 0;
 
 	my $output_aux = $output;
 	print "\n      --- Single chromosome:\n";
@@ -74,12 +76,6 @@ GetBED();
 
 		$output_aux = $output;
 
-    if($assembly_dir){
-      print $assembly_dir."\n";
-      my $file = $assembly_dir.'/'.$chrom.'.fa';
-  		print "\n      ***                  Reading   Sequence                ***\n";
-  		($seqst, $ID) = &GetFA($file); #seqst es toda la secuencia sin \n, ID es lo que hay detras de ">"
-    }
 
 		#my @cod = &GetCoords($seqst,"CG"); #coordenadas de inicio de cada elemento (solapa con la primera posición del elemento)
 		#my @cod = GetBED($assembly_dir."/".$chrom.".bed");
@@ -101,17 +97,27 @@ GetBED();
     print "      ***             Calculating   Seq   Features           ***\n";
     my ($num_dinuc,$last_chunk);
     $elemnr = $#{ $chrom_bed{$chrom}{'cStart'} } + 1; #numero de entradas almacenadas para este chrom
+    my $sum1 = $chrom_bed{$chrom}{'cStart'}[0];
+    for (my $i = 0; $i < $elemnr; $i++){
+      $sum1 += $chrom_bed{$chrom}{'cEnd'}[$i] - $chrom_bed{$chrom}{'cStart'}[$i]
+    }
+    my $elmean = int(($sum1/$elemnr) + 0.5); #longitud media de los elementos genomicos
     if($assembly_dir){ #suponemos que nos dan la secuencia
+      print $assembly_dir."\n";
+      my $file = $assembly_dir.'/'.$chrom.'.fa';
+      print "\n      ***                  Reading   Sequence                ***\n";
+      ($seqst, $ID) = &GetFA($file); #seqst es toda la secuencia sin \n, ID es lo que hay detras de ">"
+
 		  ($num_dinuc, $seqlen) = &GetSeqFeat($seqst);
       $seqlenbruto = length($seqst);
       $last_chunk = $seqlen - $chrom_bed{$chrom}{'cEnd'}[$elemnr - 1];
 		}else{ #ESTIMACIONES
       #$seqlen = $chrom_bed{$chrom}{'cEnd'}[$elemnr - 1]; #estimacion = cEnd del ultimo elemento
-      my $sum = $chrom_bed{$chrom}{'cStart'}[0];
+      my $sum2 = $chrom_bed{$chrom}{'cStart'}[0];
       for (my $i = 1; $i < $elemnr; $i++){
-        $sum += $chrom_bed{$chrom}{'cStart'}[$i] - $chrom_bed{$chrom}{'cEnd'}[$i-1]
+        $sum2 += $chrom_bed{$chrom}{'cStart'}[$i] - $chrom_bed{$chrom}{'cEnd'}[$i-1]
       }
-      $last_chunk = (int(($sum/$elemnr) + 0.5)); # se hace un round()
+      $last_chunk = (int(($sum2/$elemnr) + 0.5)); # se hace un round()
       $seqlen = $chrom_bed{$chrom}{'cEnd'}[$elemnr - 1] + $last_chunk;
       $num_dinuc = $seqlen - 1;
       $seqlenbruto = $seqlen;
@@ -125,11 +131,13 @@ GetBED();
 		if($genome_intersec){ #genome
 			$elemnr_genome += $elemnr;
 			$length_genome += $num_dinuc;
+      $elmean_genome += $elmean;
 		}
 
-		## Prob CpG ##TODO:cambiar la probabilidad
-		my $Ndach = $num_dinuc - $elemnr;
-		$prob = $elemnr/$Ndach;
+		## Prob CpG ##
+		#my $Ndach = $num_dinuc - $elemnr;
+		#$prob = $elemnr/$Ndach;
+    $prob = GetProb($num_dinuc, $elemnr, $elmean);
 
     my @dist_n = @all_dist_n[$n_chrom_index{$chrom}[0] .. $n_chrom_index{$chrom}[1]];
     push @dist_n, $last_chunk if (!$last_chunk_ns);
@@ -144,9 +152,9 @@ GetBED();
 			print "      ***      Detecting CpG clusters  (Chrom Intersec)      ***\n";
 			my @protoislas = &GetProtoIslas($chrom_bed{$chrom}{'cStart'},$chrom_bed{$chrom}{'cEnd'});
 			print "      ***       Calculating P-values  (Chrom Intersec)       ***\n";
-			@protoislas = &CalcPvalNB(\@protoislas,$prob);
+			@protoislas = &CalcPvalNB(\@protoislas,$prob,$elmean);
 			## Get Features like the obs/esp, clustering etc....
-			@protoislas = &GetCGI_features(\@protoislas);
+			#@protoislas = &GetCGI_features(\@protoislas);
 
 			## Writing output
 			$output .= $chrom."_chromIntersec_CpGcluster.txt";
@@ -186,11 +194,11 @@ GetBED();
 
 
 				print "      ***              Calculating P-values  (p$getd)           ***\n";
-				@protoislas = &CalcPvalNB(\@protoislas,$prob);
+				@protoislas = &CalcPvalNB(\@protoislas,$prob,$elmean);
 
         print "getting last features...\n";
 				## Get Features like the obs/esp, clustering etc....
-				@protoislas = &GetCGI_features(\@protoislas);
+				#@protoislas = &GetCGI_features(\@protoislas);
         print "writing\n";
 				## Writing output
 				$output .= $chrom."_p".$getd."_CpGcluster.txt";
@@ -219,22 +227,25 @@ GetBED();
     #  $elemnr += $#{ $chrom_bed{$chrom_key}{'cStart'} } + 1;
     #}
 
-		my $Ndach_genome = $length_genome - $elemnr_genome;
-		my $prob_genome = $elemnr_genome/$Ndach_genome;
-		my ($max, $min) = getMinMaxDistance(\@all_dist_n, $prob_genome);
+		#my $Ndach_genome = $length_genome - $elemnr_genome;
+		#my $prob_genome = $elemnr_genome/$Ndach_genome;
+    $elmean_genome /= (scalar keys %chrom_bed);
+    $prob = GetProb($length_genome, $elemnr_genome, $elmean_genome);
+		my ($max, $min) = getMinMaxDistance(\@all_dist_n, $prob);
 
+    $d = $max;
+    $getd = "Genome Intersection";
 		foreach my $chrom (keys %chrom_bed){
-			print "\n      ".$_."\n";
-			$d = $max;
-			$getd = "Genome Intersection";
+			print "\n      ".$chrom."\n";
+
 			### get protoislands
 			print "      ***      Detecting CpG clusters (Genome Intersec)      ***\n";
-			($seqst, $ID) = &GetFA($assembly_dir."/".$chrom.".fa");
+			#($seqst, $ID) = &GetFA($assembly_dir."/".$chrom.".fa");
 			my @protoislas = &GetProtoIslas($chrom_bed{$chrom}{'cStart'},$chrom_bed{$chrom}{'cEnd'});
 			print "      ***       Calculating P-values (Genome Intersec)       ***\n\n\n";
-			@protoislas = &CalcPvalNB(\@protoislas,$prob_genome);
+			@protoislas = &CalcPvalNB(\@protoislas,$prob,$elmean_genome);
 			## Get Features like the obs/esp, clustering etc....
-			@protoislas = &GetCGI_features(\@protoislas);
+			#@protoislas = &GetCGI_features(\@protoislas);
 
 			## Writing output
 			$output .= $chrom."_genomeIntersec_CpGcluster.txt";
@@ -434,7 +445,7 @@ sub GetBED{
   }
 }
 
-sub OUT_f {
+sub OUT_f { #TODO: crear nuevo output
   my $c=0;
 
   open (OO,">$output") or die "could not open $output";
@@ -453,7 +464,7 @@ sub OUT_f {
   print O "Basic statistics of the input sequence: $ID\n";
   printf O "Length: %d\n",$seqlen;
   printf O "Length including Ns: %d\n",$seqlenbruto;
-  my $fg = $seqst =~ s/g/g/ig;
+  my $fg = $seqst =~ s/g/g/ig; #TODO: arreglar estas variables para Genome Intersec
   my $fc = $seqst =~ s/c/c/ig;
   my $fa = $seqst =~ s/a/a/ig;
   my $ft = $seqst =~ s/t/t/ig;
@@ -480,7 +491,7 @@ sub GetProtoIslas{
   my @cStart = @{$_[0]};
   my @cEnd = @{$_[1]};
   my @t;
-  my ($start, $end);
+  my ($start, $end, $elementnr);
   my $des = "no";
   for(my $i = 0; $i <= $#cStart - 1; $i++){
 
@@ -489,18 +500,20 @@ sub GetProtoIslas{
     if($dist <= $d){
       if($des eq "no"){
 	      $start = $cStart[$i];
+        $elementnr = 0;
       }
-      $end = $cEnd[$i+1] - 1;
+      $end = $cEnd[$i+1] - 1; ##  - 1?
+      $elementnr++;
       $des = "yes";
     }
     elsif($dist > $d and $des eq "yes"){
       $des = "no";
-      my @f = ($start, $end);
+      my @f = ($start, $end, $elementnr);
       push @t,\@f;
     }
   }
   if($des eq "yes"){
-    my @f = ($start, $end);
+    my @f = ($start, $end, $elementnr);
     push @t,\@f;
   }
   return @t;
@@ -564,6 +577,10 @@ sub GetSeqFeat{
   return ($num_dinuc,$seqlen);
 }
 
+sub GetProb{
+  my ($length, $elemnr, $elmean) = @_;
+  return (($elemnr * $elmean)/$length);
+}
 
 sub GetCoords{
 
@@ -611,17 +628,20 @@ sub CalcPvalNB{
   my ($pval, @temp);
   my $c=0;
   my @islas = @{$_[0]};
+  my $prob_ge = $_[1];
+  my $elmean = $_[2];
 print "debug1\n";
 
   for(my $i = 0; $i <= $#islas; $i++){
 print $i;
     my $l = $islas[$i]->[1] - $islas[$i]->[0] + 1;
-    my $str = substr ($seqst,$islas[$i]->[0]-1,$l);
-    my $cpg = $str =~ s/cg/cg/ig;
-    #my $pval = &GetNB({{{$l-(2*$cpg}}}),$cpg-1,$_[1]); TODO: cambiar la tasa de failures
-    my $pval = &GetNB($l-(2*$cpg),$cpg-1,$_[1]);
+    #my $str = substr ($seqst,$islas[$i]->[0]-1,$l);
+    #my $cpg = $str =~ s/cg/cg/ig;
+    my $gel = $islas[$i]->[2];
+    #my $pval = &GetNB({{{$l-(2*$cpg}}}),$cpg-1,$_[1]);
+    my $pval = &GetNB($l-($elmean*$gel),$gel-1,$prob_ge);
     $pval = sprintf("%.5e",$pval);
-    my @t = ($islas[$i]->[0],$islas[$i]->[1],$l,$cpg,$pval);
+    my @t = ($islas[$i]->[0],$islas[$i]->[1],$l,$gel,$pval);
     push @temp, \@t;;
     $c++;
   }
@@ -630,7 +650,6 @@ print $i;
   return @temp;
 }
 sub GetNB{
-  
   my $pval = 0;
   for(my $j = 0; $j <= $_[0]; $j++){
     my $ptemp = &FactorialNB($j,$_[1]) + $_[1]*log($_[2]) + $j*log(1.0-$_[2]);
@@ -706,31 +725,31 @@ sub GetCoord{
 sub getMinMaxDistance{
 	my @distances = @{$_[0]};
 	my $prob = $_[1];
-	
+
 	my @distCount = ();
 	my $maxDist = 0;
 	my $nrDistances = 0;
 	my $stop = @distances;
-	
+
 	for(my $i = 0; $i < $stop; $i++){
 		$nrDistances++;
 		my $dist = $distances[$i];
-	
+
 		if(defined $distCount[$dist]){
 			$distCount[$dist]++;
 		}else{
 			$distCount[$dist] = 1;
 		}
-		
+
 		if($dist > $maxDist){
 			$maxDist = $dist;
 		}
 	}
-	
+
 	my $obsCum = 0;
 	my $teoCum = 0;
 	my @dif = ();
-	
+
 	for(my $i = 1; $i <= $maxDist; $i++){
 		if(defined $distCount[$i]){
 			$obsCum += $distCount[$i]/$nrDistances;
@@ -738,7 +757,7 @@ sub getMinMaxDistance{
 		$teoCum += $prob * (1 - $prob)**($i-1);
 		$dif[$i] = ($obsCum - $teoCum);
 	}
-	
+
 	my $max = -1;
 	my $min = 1;
 	my $maxD = 0;
@@ -756,6 +775,6 @@ sub getMinMaxDistance{
 			}
 		}
 	}
-	
+
 	return ($maxD, $minD);
 }
