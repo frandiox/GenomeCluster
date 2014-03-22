@@ -24,9 +24,9 @@
 
 # If you use GenomeCluster, please cite
 
-# Dios F., G. Barturen, R. Lebrón, M. Hackenberg and J.L. Oliver. 2014.
-# DNA clustering: A source of genome complexity
-# Computational Chemistry and Biology (in preparation)
+# Dios F., G. Barturen, R. Lebrón, A. Rueda, M. Hackenberg and J.L. oliver. 2014.
+# DNA clustering and genome complexity
+# Computational Biology and Chemistry (in preparation)
 
 ############################################################################
 ############################################################################
