@@ -1,4 +1,6 @@
-CpGc_expansion
+GenomeCluster
 ==============
 
-CpGcluster expansion
+This software is a CpGcluster2 expansion.
+
+Website: http://bioinfo2.ugr.es/GenomeCluster/
